@@ -1,26 +1,38 @@
 package com.flutter_webview_plugin;
 
+import android.Manifest;
 import android.content.Intent;
 import android.net.Uri;
 import android.annotation.TargetApi;
 import android.app.Activity;
+import android.app.DownloadManager;
+import android.content.ActivityNotFoundException;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.net.http.SslError;
 import android.os.Build;
+import android.os.Environment;
 import android.os.Handler;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
+import android.webkit.DownloadListener;
 import android.webkit.GeolocationPermissions;
 import android.webkit.SslErrorHandler;
+import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
+import android.widget.Toast;
 import android.provider.MediaStore;
 
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 
 import android.database.Cursor;
@@ -126,13 +138,42 @@ class WebviewManager {
     ResultHandler resultHandler;
     Context context;
     private boolean ignoreSSLErrors = false;
+    private HashMap download;
 
-    WebviewManager(final Activity activity, final Context context, final List<String> channelNames) {
+    private BroadcastReceiver broadcastReceiver = new BroadcastReceiver() {
+        public void onReceive(Context ctxt, Intent intent) {
+            DownloadManager dm = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+            Long downloadId = intent.getExtras().getLong(DownloadManager.EXTRA_DOWNLOAD_ID);
+            DownloadManager.Query q = new DownloadManager.Query();
+            q.setFilterById(downloadId);
+            Cursor c = dm.query(q);
+            if (c.moveToFirst()) {
+                String localUri = c.getString(c.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI));
+                String mimetype = c.getString(c.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE));
+                File localFile = new File(Uri.parse(localUri).getPath());
+                String packageName = context.getPackageName();
+                Intent fileIntent = new Intent(Intent.ACTION_VIEW);
+                fileIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                fileIntent.setDataAndType(
+                        FileProvider.getUriForFile(context, packageName + ".fileprovider", localFile),
+                        mimetype);
+                try {
+                    activity.startActivity(fileIntent);
+                } catch (ActivityNotFoundException e) {
+                    // don't do anything when there is no default activity assigned to this mime type
+                }
+            }
+        }
+    };
+
+    WebviewManager(final Activity activity, final Context context, final List<String> channelNames, final int permissionCode) {
         this.webView = new ObservableWebView(activity);
         this.activity = activity;
         this.context = context;
         this.resultHandler = new ResultHandler();
         this.platformThreadHandler = new Handler(context.getMainLooper());
+        this.activity.registerReceiver(broadcastReceiver, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+
         webViewClient = new BrowserClient() {
             @Override
             public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
@@ -159,6 +200,23 @@ class WebviewManager {
                 }
 
                 return false;
+            }
+        });
+
+        webView.setDownloadListener(new DownloadListener() {
+            public void onDownloadStart(String url, String userAgent,
+                                        String contentDisposition, String mimetype,
+                                        long contentLength) {
+                download = new HashMap();
+                download.put("url", url);
+                download.put("userAgent", userAgent);
+                download.put("contentDisposition", contentDisposition);
+                download.put("mimetype", mimetype);
+                if (ContextCompat.checkSelfPermission(activity, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                    ActivityCompat.requestPermissions(activity, new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, permissionCode);
+                } else {
+                    downloadFile();
+                }
             }
         });
 
@@ -266,6 +324,29 @@ class WebviewManager {
             }
         });
         registerJavaScriptChannelNames(channelNames);
+    }
+
+    public void downloadFile() {
+        if (this.download != null) {
+            String url = (String)this.download.get("url");
+            String userAgent = (String)this.download.get("userAgent");
+            String contentDisposition = (String)this.download.get("contentDisposition");
+            String mimetype = (String)this.download.get("mimetype");
+            this.download = null;
+            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+            request.setMimeType(mimetype);
+            request.addRequestHeader("Cookie", CookieManager.getInstance().getCookie(url));
+            request.addRequestHeader("User-Agent", userAgent);
+            request.setDescription("Download...");
+            String filename = URLUtil.guessFileName(url, contentDisposition, mimetype);
+            request.setTitle(filename);
+            request.allowScanningByMediaScanner();
+            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename);
+            DownloadManager dm = (DownloadManager) this.context.getSystemService(Context.DOWNLOAD_SERVICE);
+            dm.enqueue(request);
+            Toast.makeText(this.context.getApplicationContext(), "Download...", Toast.LENGTH_LONG).show();
+        }
     }
 
     private Uri getOutputFilename(String intentType) {
@@ -456,6 +537,7 @@ class WebviewManager {
     }
 
     void close(MethodCall call, MethodChannel.Result result) {
+        this.activity.unregisterReceiver(this.broadcastReceiver);
         if (webView != null) {
             ViewGroup vg = (ViewGroup) (webView.getParent());
             vg.removeView(webView);

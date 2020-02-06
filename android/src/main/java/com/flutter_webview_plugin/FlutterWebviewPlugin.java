@@ -4,6 +4,7 @@ package com.flutter_webview_plugin;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Point;
 import android.view.Display;
 import android.webkit.WebStorage;
@@ -24,19 +25,21 @@ import io.flutter.plugin.common.PluginRegistry;
 /**
  * FlutterWebviewPlugin
  */
-public class FlutterWebviewPlugin implements MethodCallHandler, PluginRegistry.ActivityResultListener {
+public class FlutterWebviewPlugin implements MethodCallHandler, PluginRegistry.ActivityResultListener, PluginRegistry.RequestPermissionsResultListener {
     private Activity activity;
     private WebviewManager webViewManager;
     private Context context;
     static MethodChannel channel;
     private static final String CHANNEL_NAME = "flutter_webview_plugin";
     private static final String JS_CHANNEL_NAMES_FIELD = "javascriptChannelNames";
+    private static final int PERMISSION_CODE = 7474;
 
     public static void registerWith(PluginRegistry.Registrar registrar) {
         if (registrar.activity() != null) {
             channel = new MethodChannel(registrar.messenger(), CHANNEL_NAME);
             final FlutterWebviewPlugin instance = new FlutterWebviewPlugin(registrar.activity(), registrar.activeContext());
             registrar.addActivityResultListener(instance);
+            registrar.addRequestPermissionsResultListener(instance);
             channel.setMethodCallHandler(instance);
         }
     }
@@ -135,7 +138,7 @@ public class FlutterWebviewPlugin implements MethodCallHandler, PluginRegistry.A
             if (arguments.containsKey(JS_CHANNEL_NAMES_FIELD)) {
                 channelNames = (List<String>) arguments.get(JS_CHANNEL_NAMES_FIELD);
             }
-            webViewManager = new WebviewManager(activity, context, channelNames);
+            webViewManager = new WebviewManager(activity, context, channelNames, PERMISSION_CODE);
         }
 
         FrameLayout.LayoutParams params = buildLayoutParams(call);
@@ -321,6 +324,19 @@ public class FlutterWebviewPlugin implements MethodCallHandler, PluginRegistry.A
     public boolean onActivityResult(int i, int i1, Intent intent) {
         if (webViewManager != null && webViewManager.resultHandler != null) {
             return webViewManager.resultHandler.handleResult(i, i1, intent);
+        }
+        return false;
+    }
+
+    @Override
+    public boolean onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        if (requestCode == PERMISSION_CODE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                if (webViewManager != null) {
+                    webViewManager.downloadFile();
+                }
+            }
+            return true;
         }
         return false;
     }
