@@ -148,19 +148,25 @@ class WebviewManager {
             q.setFilterById(downloadId);
             Cursor c = dm.query(q);
             if (c.moveToFirst()) {
-                String localUri = c.getString(c.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI));
-                String mimetype = c.getString(c.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE));
-                File localFile = new File(Uri.parse(localUri).getPath());
-                String packageName = context.getPackageName();
-                Intent fileIntent = new Intent(Intent.ACTION_VIEW);
-                fileIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                fileIntent.setDataAndType(
-                        FileProvider.getUriForFile(context, packageName + ".fileprovider", localFile),
-                        mimetype);
-                try {
-                    activity.startActivity(fileIntent);
-                } catch (ActivityNotFoundException e) {
-                    // don't do anything when there is no default activity assigned to this mime type
+                int status = c.getInt(c.getColumnIndex(DownloadManager.COLUMN_STATUS));
+                if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                    String localUri = c.getString(c.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI));
+                    String mimetype = c.getString(c.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE));
+                    File localFile = new File(Uri.parse(localUri).getPath());
+                    String packageName = context.getPackageName();
+                    Intent fileIntent = new Intent(Intent.ACTION_VIEW);
+                    fileIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    fileIntent.setDataAndType(
+                            FileProvider.getUriForFile(context, packageName + ".fileprovider", localFile),
+                            mimetype);
+                    try {
+                        activity.startActivity(fileIntent);
+                    } catch (ActivityNotFoundException e) {
+                        // don't do anything when there is no default activity assigned to this mime type
+                    }
+                } else {
+                    int reason = c.getInt(c.getColumnIndex(DownloadManager.COLUMN_REASON));
+                    Toast.makeText(ctxt.getApplicationContext(), "Error " + reason, Toast.LENGTH_LONG).show();
                 }
             }
         }
