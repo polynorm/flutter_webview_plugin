@@ -135,6 +135,9 @@ static NSString *const CHANNEL_NAME = @"flutter_webview_plugin";
 
     WKWebViewConfiguration* configuration = [[WKWebViewConfiguration alloc] init];
     configuration.userContentController = userContentController;
+    if (@available(iOS 13, *)) {
+        configuration.defaultWebpagePreferences.preferredContentMode = WKContentModeMobile;
+    }
     self.webview = [[WKWebView alloc] initWithFrame:rc configuration:configuration];
     self.webview.UIDelegate = self;
     self.webview.navigationDelegate = self;
